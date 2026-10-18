@@ -67,7 +67,7 @@ func _draw() -> void:
 
 func _on_body_entered(body: Node) -> void:
 	if body is CharacterBody2D:
-		if body.name.to_int() == shooter:
+		# The game decides: shooter and teammates are passed through, everyone else absorbs the bullet.
+		if not get_parent().get_parent().hit_player(body, shooter, DAMAGE):
 			return
-		body.take_damage.rpc(DAMAGE)
 	queue_free()

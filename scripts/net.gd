@@ -1,15 +1,20 @@
 extends Node
 ## Networking autoload: owns the ENet peer, registers input actions,
 ## and communicates with the Bun.js multiplayer backend for room matchmaking.
-## Dedicated server: godot --headless -- --server [--port=7777]
+## Dedicated server: godot --headless -- --server [--port=7777] [--map=farm] [--mode=kills]
 
 const DEFAULT_PORT := 7777
 const MAX_CLIENTS := 32
 const GAME_SCENE := "res://scenes/game.tscn"
 const MENU_SCENE := "res://scenes/main.tscn"
 const DEFAULT_BUN_URL := "http://localhost:3000"
+const MapDefs := preload("res://scripts/map_defs.gd")
+const ModeDefs := preload("res://scripts/mode_defs.gd")
 
 var dedicated := false
+## Chosen by whoever hosts; clients are told by the server when they join.
+var map_id: String = MapDefs.ORDER[0]
+var mode_id: String = ModeDefs.ORDER[0]
 var bun_url: String = DEFAULT_BUN_URL
 var current_room_code: String = ""
 var _heartbeat_timer: Timer
@@ -23,6 +28,10 @@ func _ready() -> void:
 		for a in args:
 			if a.begins_with("--port="):
 				port = a.get_slice("=", 1).to_int()
+			elif a.begins_with("--map="):
+				map_id = _checked(a.get_slice("=", 1), MapDefs.has_map(a.get_slice("=", 1)), map_id)
+			elif a.begins_with("--mode="):
+				mode_id = _checked(a.get_slice("=", 1), ModeDefs.has_mode(a.get_slice("=", 1)), mode_id)
 		dedicated = true
 		if host(port) == OK:
 			print("Dedicated server listening on port ", port)
@@ -34,6 +43,12 @@ func _ready() -> void:
 
 func set_bun_url(url: String) -> void:
 	bun_url = url.strip_edges().trim_suffix("/")
+
+
+func _checked(value: String, valid: bool, fallback: String) -> String:
+	if not valid:
+		push_warning("Unknown value '%s', using '%s'" % [value, fallback])
+	return value if valid else fallback
 
 
 func host(port: int = DEFAULT_PORT) -> Error:
