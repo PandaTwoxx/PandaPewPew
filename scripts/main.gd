@@ -7,6 +7,11 @@ var _status: Label
 
 
 func _ready() -> void:
+	var bg := ColorRect.new()
+	bg.color = Color("#6aa84f")
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	box.custom_minimum_size = Vector2(300, 0)
@@ -16,6 +21,10 @@ func _ready() -> void:
 
 	var title := Label.new()
 	title.text = "PandaPewPew"
+	title.add_theme_font_size_override("font_size", 52)
+	title.add_theme_color_override("font_color", Color("#fff3cf"))
+	title.add_theme_color_override("font_outline_color", Color("#5b1d1a"))
+	title.add_theme_constant_override("outline_size", 12)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 
@@ -38,6 +47,12 @@ func _ready() -> void:
 	join_btn.text = "Join"
 	join_btn.pressed.connect(_on_join)
 	box.add_child(join_btn)
+
+	var sub := Label.new()
+	sub.text = "Farmyard Fracas"
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(sub)
+	box.move_child(sub, 1)
 
 	_status = Label.new()
 	box.add_child(_status)
