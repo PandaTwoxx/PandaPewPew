@@ -5,10 +5,13 @@ extends CharacterBody2D
 const SPEED := 300.0
 const MAX_HEALTH := 100
 const FIRE_COOLDOWN := 0.25
+const ROUND_TIME := 10.0     # seconds the gun may fire once a round starts
+const GUN_COOLDOWN := 5.0    # seconds it is locked after the round ends
 
 var aim_angle := 0.0
 var health := MAX_HEALTH
 var _last_shot := 0.0
+var _round_start := -1.0  # when the current firing round began (-1 = none); server + owner track it
 
 
 func _enter_tree() -> void:
@@ -35,10 +38,34 @@ func _physics_process(_delta: float) -> void:
 	aim_angle = (get_global_mouse_position() - global_position).angle()
 
 
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
+## 0 = ready (no round running), 1 = firing round, 2 = cooling down.
+func _gun_phase() -> int:
+	if _round_start < 0.0:
+		return 0
+	var el := _now() - _round_start
+	if el < ROUND_TIME:
+		return 1
+	if el < ROUND_TIME + GUN_COOLDOWN:
+		return 2
+	_round_start = -1.0
+	return 0
+
+
 func _process(_delta: float) -> void:
 	queue_redraw()
-	if is_multiplayer_authority() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if is_multiplayer_authority() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
+			and _gun_phase() != 2:
 		shoot.rpc_id(1, Vector2.from_angle(aim_angle))
+
+
+@rpc("any_peer", "reliable")
+func _round_started() -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		_round_start = _now()
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -49,9 +76,16 @@ func shoot(dir: Vector2) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	if sender != 0 and sender != name.to_int():
 		return
-	var now := Time.get_ticks_msec() / 1000.0
+	var now := _now()
 	if now - _last_shot < FIRE_COOLDOWN or dir.length() < 0.5:
 		return
+	var phase := _gun_phase()
+	if phase == 2:
+		return
+	if phase == 0:
+		_round_start = now
+		if name.to_int() != 1:
+			_round_started.rpc_id(name.to_int())
 	_last_shot = now
 	get_parent().get_parent().spawn_bullet(
 		global_position + dir.normalized() * 24, dir.normalized(), name.to_int())
@@ -98,13 +132,28 @@ func _draw() -> void:
 	var frac := clampf(float(health) / MAX_HEALTH, 0, 1)
 	var hc := Color("#5fd35f") if frac > 0.5 else (Color("#f2c230") if frac > 0.25 else Color("#e0452e"))
 	draw_rect(Rect2(-w / 2, -32, w * frac, 5), hc)
+	if is_multiplayer_authority() and not Net.dedicated:
+		var phase := _gun_phase()
+		var el := _now() - _round_start
+		var gf := 1.0
+		var gc := Color("#7fd0ff")
+		if phase == 1:
+			gf = 1.0 - el / ROUND_TIME
+			gc = Color("#ffb347")
+		elif phase == 2:
+			gf = (el - ROUND_TIME) / GUN_COOLDOWN
+			gc = Color("#e0452e")
+		draw_rect(Rect2(-w / 2 - 1, 25, w + 2, 6), Color(0, 0, 0, 0.6))
+		draw_rect(Rect2(-w / 2, 26, w * clampf(gf, 0, 1), 4), gc)
 
 
 func _gun() -> void:
 	# Veggie blaster: wooden barrel with a brass muzzle, pointing along the aim.
-	draw_line(Vector2(6, 0), Vector2(30, 0), Color("#5b3a1e"), 7)
-	draw_line(Vector2(6, -1.5), Vector2(30, -1.5), Color("#8a5a2e"), 2)
-	draw_line(Vector2(27, 0), Vector2(31, 0), Color("#d4a017"), 8)
+	# The owner sees it glow red while locked out.
+	var hot := is_multiplayer_authority() and _gun_phase() == 2
+	draw_line(Vector2(6, 0), Vector2(30, 0), Color("#7a2a1e") if hot else Color("#5b3a1e"), 7)
+	draw_line(Vector2(6, -1.5), Vector2(30, -1.5), Color("#c0452e") if hot else Color("#8a5a2e"), 2)
+	draw_line(Vector2(27, 0), Vector2(31, 0), Color("#555555") if hot else Color("#d4a017"), 8)
 
 
 func _draw_pig() -> void:
