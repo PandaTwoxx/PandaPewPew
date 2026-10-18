@@ -145,7 +145,7 @@ func _build_hud() -> void:
 	label.add_theme_color_override("font_outline_color", Color("#2b1d0e"))
 	label.add_theme_constant_override("outline_size", 6)
 	label.add_theme_font_size_override("font_size", 16)
-	label.text = "WASD move, mouse aim, click shoot, Esc leave" + (
+	label.text = "WASD move, mouse aim, click shoot (10s fire / 5s cooldown), Esc leave" + (
 		"  [dedicated server]" if Net.dedicated else "")
 	layer.add_child(label)
 	add_child(layer)
