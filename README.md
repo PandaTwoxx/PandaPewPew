@@ -1,11 +1,16 @@
 # PandaPewPew
 
-2D top-down multiplayer shooter base (Godot 4, GDScript, ENet).
+2D top-down multiplayer shooter base (Godot 4, GDScript, ENet & Bun.js).
 
-- Run the project, then **Host**, or **Join** with an IP/port (default 7777).
-- Pick the **map** and **mode** in the Host panel. Clients are told by the server on join.
-- Dedicated server: `godot --headless --path . -- --server --port=7777 --map=farm --mode=kills` (up to 32 clients).
-- Controls: WASD move, mouse aim, hold left click to shoot (10s firing round, then 5s gun cooldown), hold Tab for the scoreboard, Esc leaves.
+- **Multiplayer Modes**:
+  - **Online Rooms (Bun.js)**: Create or join rooms via 4-character codes (e.g. `FARM`, `PAND`), or browse active lobbies.
+  - **Direct LAN / IP**: Host or join directly with IP and port (default 7777).
+- **Bun.js Multiplayer Backend**:
+  - Start backend: `cd server && bun install && bun run start` (runs on `http://localhost:3000`).
+  - Supports room matchmaking, live WebSocket lobby sync (`/ws`), and automated headless server spawning.
+- **Dedicated Server**: `godot --headless --path . -- --server --port=7777 --map=farm --mode=kills` (up to 32 clients), or click **Launch Dedicated** in the Bun lobby.
+- **Controls**: WASD move, mouse aim, hold left click to shoot (10s firing round, then 5s gun cooldown), hold Tab for the scoreboard, Esc leaves.
+- **Map & mode**: pick them in the Host panel; clients are told by the server on join.
 
 Maps (`scripts/map_defs.gd`): `farm`, `orchard`, `corral`.
 Modes (`scripts/mode_defs.gd`, rules in `scripts/modes/`):

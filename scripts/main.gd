@@ -26,6 +26,17 @@ var _tab_guide: Control
 var _tab_settings: Control
 var _tab_buttons: Array[Button] = []
 
+# Bun backend controls
+var _bun_panel_rooms: Control
+var _bun_panel_direct: Control
+var _bun_submode_btn_rooms: Button
+var _bun_submode_btn_direct: Button
+var _bun_room_name_input: LineEdit
+var _bun_room_code_input: LineEdit
+var _bun_rooms_container: VBoxContainer
+var _bun_url_input: LineEdit
+var _bun_backend_status_label: Label
+
 var _connecting: bool = false
 var _connect_timer: float = 0.0
 
@@ -272,6 +283,174 @@ func _build_ui() -> void:
 
 
 func _build_play_tab(parent: Control) -> void:
+	var submode_bar := HBoxContainer.new()
+	submode_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	submode_bar.add_theme_constant_override("separation", 8)
+	parent.add_child(submode_bar)
+
+	_bun_submode_btn_rooms = _create_pill_button("🌐 Online Rooms (Bun.js)")
+	_bun_submode_btn_direct = _create_pill_button("⚡ Direct LAN / IP")
+	submode_bar.add_child(_bun_submode_btn_rooms)
+	submode_bar.add_child(_bun_submode_btn_direct)
+
+	_bun_submode_btn_rooms.pressed.connect(func(): _switch_play_submode(0))
+	_bun_submode_btn_direct.pressed.connect(func(): _switch_play_submode(1))
+
+	# Container for the two submode panels
+	var submode_stack := MarginContainer.new()
+	submode_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(submode_stack)
+
+	# --- SUBMODE 0: BUN.JS ONLINE LOBBIES ---
+	_bun_panel_rooms = VBoxContainer.new()
+	_bun_panel_rooms.add_theme_constant_override("separation", 10)
+	submode_stack.add_child(_bun_panel_rooms)
+	_build_bun_rooms_panel(_bun_panel_rooms)
+
+	# --- SUBMODE 1: DIRECT IP / LAN ---
+	_bun_panel_direct = VBoxContainer.new()
+	_bun_panel_direct.visible = false
+	_bun_panel_direct.add_theme_constant_override("separation", 10)
+	submode_stack.add_child(_bun_panel_direct)
+	_build_direct_panel(_bun_panel_direct)
+
+	_switch_play_submode(0)
+
+
+func _switch_play_submode(mode: int) -> void:
+	_audio.play_click()
+	_bun_panel_rooms.visible = (mode == 0)
+	_bun_panel_direct.visible = (mode == 1)
+
+	var active_style := StyleBoxFlat.new()
+	active_style.bg_color = Color(0.18, 0.65, 0.42, 0.85)
+	active_style.set_corner_radius_all(10)
+	active_style.content_margin_left = 10
+	active_style.content_margin_right = 10
+	active_style.content_margin_top = 3
+	active_style.content_margin_bottom = 3
+
+	var inactive_style := StyleBoxFlat.new()
+	inactive_style.bg_color = Color(0.12, 0.18, 0.24, 0.6)
+	inactive_style.border_color = Color(0.25, 0.4, 0.5, 0.4)
+	inactive_style.set_border_width_all(1)
+	inactive_style.set_corner_radius_all(10)
+	inactive_style.content_margin_left = 10
+	inactive_style.content_margin_right = 10
+	inactive_style.content_margin_top = 3
+	inactive_style.content_margin_bottom = 3
+
+	if mode == 0:
+		_bun_submode_btn_rooms.add_theme_stylebox_override("normal", active_style)
+		_bun_submode_btn_direct.add_theme_stylebox_override("normal", inactive_style)
+		_refresh_bun_rooms()
+	else:
+		_bun_submode_btn_rooms.add_theme_stylebox_override("normal", inactive_style)
+		_bun_submode_btn_direct.add_theme_stylebox_override("normal", active_style)
+
+
+func _build_bun_rooms_panel(parent: Control) -> void:
+	var top_grid := HBoxContainer.new()
+	top_grid.add_theme_constant_override("separation", 12)
+	parent.add_child(top_grid)
+
+	# 1. Create Room Card
+	var create_panel := PanelContainer.new()
+	create_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var c_style := StyleBoxFlat.new()
+	c_style.bg_color = Color(0.12, 0.17, 0.22, 0.75)
+	c_style.set_corner_radius_all(8)
+	c_style.border_color = Color(0.15, 0.6, 0.35, 0.35)
+	c_style.set_border_width_all(1)
+	c_style.content_margin_left = 10
+	c_style.content_margin_right = 10
+	c_style.content_margin_top = 8
+	c_style.content_margin_bottom = 8
+	create_panel.add_theme_stylebox_override("panel", c_style)
+	top_grid.add_child(create_panel)
+
+	var c_vbox := VBoxContainer.new()
+	c_vbox.add_theme_constant_override("separation", 6)
+	create_panel.add_child(c_vbox)
+
+	var c_title := Label.new()
+	c_title.text = "HOST ONLINE LOBBY"
+	c_title.add_theme_font_size_override("font_size", 12)
+	c_title.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
+	c_vbox.add_child(c_title)
+
+	_bun_room_name_input = _create_line_edit("Panda Arena", "Room Name")
+	c_vbox.add_child(_bun_room_name_input)
+
+	var create_btn := _create_action_button("🚀 Create Room", Color(0.12, 0.72, 0.42), Color(0.15, 0.85, 0.48))
+	create_btn.pressed.connect(_on_bun_create)
+	c_vbox.add_child(create_btn)
+
+	# 2. Join by Code Card
+	var join_panel := PanelContainer.new()
+	join_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var j_style := StyleBoxFlat.new()
+	j_style.bg_color = Color(0.12, 0.17, 0.22, 0.75)
+	j_style.set_corner_radius_all(8)
+	j_style.border_color = Color(0.15, 0.55, 0.85, 0.35)
+	j_style.set_border_width_all(1)
+	j_style.content_margin_left = 10
+	j_style.content_margin_right = 10
+	j_style.content_margin_top = 8
+	j_style.content_margin_bottom = 8
+	join_panel.add_theme_stylebox_override("panel", j_style)
+	top_grid.add_child(join_panel)
+
+	var j_vbox := VBoxContainer.new()
+	j_vbox.add_theme_constant_override("separation", 6)
+	join_panel.add_child(j_vbox)
+
+	var j_title := Label.new()
+	j_title.text = "JOIN BY ROOM CODE"
+	j_title.add_theme_font_size_override("font_size", 12)
+	j_title.add_theme_color_override("font_color", Color(0.38, 0.8, 1.0))
+	j_vbox.add_child(j_title)
+
+	_bun_room_code_input = _create_line_edit("", "e.g. FARM")
+	_bun_room_code_input.max_length = 6
+	_bun_room_code_input.text_submitted.connect(func(_t): _on_bun_join_code())
+	j_vbox.add_child(_bun_room_code_input)
+
+	var join_code_btn := _create_action_button("🎯 Join by Code", Color(0.12, 0.52, 0.88), Color(0.18, 0.65, 1.0))
+	join_code_btn.pressed.connect(_on_bun_join_code)
+	j_vbox.add_child(join_code_btn)
+
+	# 3. Active Lobbies Browser List
+	var list_header := HBoxContainer.new()
+	parent.add_child(list_header)
+
+	var list_title := Label.new()
+	list_title.text = "ACTIVE ROOMS"
+	list_title.add_theme_font_size_override("font_size", 11)
+	list_title.add_theme_color_override("font_color", Color(0.7, 0.8, 0.9))
+	list_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_header.add_child(list_title)
+
+	var dedicated_btn := _create_mini_pill("☁️ Launch Dedicated")
+	dedicated_btn.pressed.connect(_on_bun_spawn_dedicated)
+	list_header.add_child(dedicated_btn)
+
+	var refresh_btn := _create_mini_pill("🔄 Refresh")
+	refresh_btn.pressed.connect(_refresh_bun_rooms)
+	list_header.add_child(refresh_btn)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 75)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(scroll)
+
+	_bun_rooms_container = VBoxContainer.new()
+	_bun_rooms_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bun_rooms_container.add_theme_constant_override("separation", 4)
+	scroll.add_child(_bun_rooms_container)
+
+
+func _build_direct_panel(parent: Control) -> void:
 	var grid := HBoxContainer.new()
 	grid.add_theme_constant_override("separation", 16)
 	parent.add_child(grid)
@@ -292,12 +471,12 @@ func _build_play_tab(parent: Control) -> void:
 	grid.add_child(host_panel)
 
 	var host_vbox := VBoxContainer.new()
-	host_vbox.add_theme_constant_override("separation", 10)
+	host_vbox.add_theme_constant_override("separation", 8)
 	host_panel.add_child(host_vbox)
 
 	var host_title := Label.new()
-	host_title.text = "CREATE SERVER"
-	host_title.add_theme_font_size_override("font_size", 14)
+	host_title.text = "HOST DIRECT (LAN/PORT)"
+	host_title.add_theme_font_size_override("font_size", 13)
 	host_title.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
 	host_vbox.add_child(host_title)
 
@@ -331,7 +510,7 @@ func _build_play_tab(parent: Control) -> void:
 	_update_mode_desc()
 
 	var host_desc := Label.new()
-	host_desc.text = "Host a match on your machine. Up to 32 players can join."
+	host_desc.text = "Host a direct game on your LAN or forwarded port."
 	host_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	host_desc.add_theme_font_size_override("font_size", 11)
 	host_desc.add_theme_color_override("font_color", Color(0.55, 0.65, 0.7))
@@ -341,7 +520,7 @@ func _build_play_tab(parent: Control) -> void:
 	host_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	host_vbox.add_child(host_spacer)
 
-	_host_btn = _create_action_button("🚀 Host Game", Color(0.12, 0.72, 0.42), Color(0.15, 0.85, 0.48))
+	_host_btn = _create_action_button("🚀 Host LAN", Color(0.12, 0.72, 0.42), Color(0.15, 0.85, 0.48))
 	_host_btn.pressed.connect(_on_host)
 	host_vbox.add_child(_host_btn)
 
@@ -365,8 +544,8 @@ func _build_play_tab(parent: Control) -> void:
 	join_panel.add_child(join_vbox)
 
 	var join_title := Label.new()
-	join_title.text = "JOIN SERVER"
-	join_title.add_theme_font_size_override("font_size", 14)
+	join_title.text = "JOIN VIA IP & PORT"
+	join_title.add_theme_font_size_override("font_size", 13)
 	join_title.add_theme_color_override("font_color", Color(0.38, 0.8, 1.0))
 	join_vbox.add_child(join_title)
 
@@ -419,7 +598,7 @@ func _build_play_tab(parent: Control) -> void:
 	join_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	join_vbox.add_child(join_spacer)
 
-	_join_btn = _create_action_button("🎯 Join Match", Color(0.12, 0.52, 0.88), Color(0.18, 0.65, 1.0))
+	_join_btn = _create_action_button("🎯 Join Direct", Color(0.12, 0.52, 0.88), Color(0.18, 0.65, 1.0))
 	_join_btn.pressed.connect(_on_join)
 	join_vbox.add_child(_join_btn)
 
@@ -440,6 +619,12 @@ func _labeled_row(text: String, control: Control) -> HBoxContainer:
 
 func _update_mode_desc() -> void:
 	_mode_desc.text = ModeDefs.MODES[ModeDefs.ORDER[_mode_select.selected]].desc
+
+
+## Host-side choice; clients learn it from the server when they join.
+func _apply_game_choice() -> void:
+	Net.map_id = MapDefs.ORDER[_map_select.selected]
+	Net.mode_id = ModeDefs.ORDER[_mode_select.selected]
 
 
 func _build_guide_tab(parent: Control) -> void:
@@ -494,6 +679,53 @@ func _build_settings_tab(parent: Control) -> void:
 	desc.add_theme_color_override("font_color", Color(0.8, 0.9, 0.95))
 	parent.add_child(desc)
 
+	# Bun Backend configuration block
+	var bun_box := PanelContainer.new()
+	var b_style := StyleBoxFlat.new()
+	b_style.bg_color = Color(0.06, 0.1, 0.14, 0.85)
+	b_style.border_color = Color(0.2, 0.7, 0.45, 0.4)
+	b_style.set_border_width_all(1)
+	b_style.set_corner_radius_all(8)
+	b_style.content_margin_left = 12
+	b_style.content_margin_right = 12
+	b_style.content_margin_top = 8
+	b_style.content_margin_bottom = 8
+	bun_box.add_theme_stylebox_override("panel", b_style)
+	parent.add_child(bun_box)
+
+	var b_vbox := VBoxContainer.new()
+	b_vbox.add_theme_constant_override("separation", 6)
+	bun_box.add_child(b_vbox)
+
+	var b_title := Label.new()
+	b_title.text = "Bun.js Multiplayer Backend URL:"
+	b_title.add_theme_font_size_override("font_size", 11)
+	b_title.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
+	b_vbox.add_child(b_title)
+
+	var b_hbox := HBoxContainer.new()
+	b_hbox.add_theme_constant_override("separation", 8)
+	b_vbox.add_child(b_hbox)
+
+	_bun_url_input = _create_line_edit(Net.bun_url, "http://localhost:3000")
+	_bun_url_input.text_changed.connect(func(new_url: String):
+		Net.set_bun_url(new_url)
+		_save_settings()
+	)
+	b_hbox.add_child(_bun_url_input)
+
+	var test_btn := Button.new()
+	test_btn.text = "Test Connection"
+	test_btn.add_theme_font_size_override("font_size", 11)
+	test_btn.pressed.connect(_test_bun_connection)
+	b_hbox.add_child(test_btn)
+
+	_bun_backend_status_label = Label.new()
+	_bun_backend_status_label.text = "Status: Not tested yet"
+	_bun_backend_status_label.add_theme_font_size_override("font_size", 10)
+	_bun_backend_status_label.add_theme_color_override("font_color", Color(0.7, 0.8, 0.85))
+	b_vbox.add_child(_bun_backend_status_label)
+
 	# Dedicated server helper block
 	var dedicated_box := PanelContainer.new()
 	var d_style := StyleBoxFlat.new()
@@ -541,7 +773,7 @@ func _build_settings_tab(parent: Control) -> void:
 
 	# Engine info
 	var info_lbl := Label.new()
-	info_lbl.text = "Engine: Godot 4.3+ • ENet Synchronizer & Replication • Authoritative Server"
+	info_lbl.text = "Engine: Godot 4.3+ • Bun.js Backend & ENet Synchronizer • Authoritative Server"
 	info_lbl.add_theme_font_size_override("font_size", 10)
 	info_lbl.add_theme_color_override("font_color", Color(0.5, 0.6, 0.65))
 	parent.add_child(info_lbl)
@@ -736,8 +968,7 @@ func _join_port_value() -> int:
 func _on_host() -> void:
 	_audio.play_click()
 	var port := _host_port_value()
-	Net.map_id = MapDefs.ORDER[_map_select.selected]
-	Net.mode_id = ModeDefs.ORDER[_mode_select.selected]
+	_apply_game_choice()
 	var err := Net.host(port)
 	if err != OK:
 		_set_status("Host failed (error %d). Port %d may already be in use." % [err, port], Color(0.95, 0.25, 0.25))
@@ -813,12 +1044,187 @@ func _set_status(msg: String, col: Color) -> void:
 	_status_dot.color = col
 
 
+# --- BUN.JS BACKEND ACTIONS ---
+
+func _on_bun_create() -> void:
+	_audio.play_click()
+	var r_name := _bun_room_name_input.text.strip_edges()
+	if r_name.is_empty():
+		r_name = "Panda Arena"
+
+	_set_status("Registering room on Bun.js backend...", Color(0.95, 0.8, 0.2))
+	var port := Net.DEFAULT_PORT
+	_apply_game_choice()
+	var host_err := Net.host(port)
+	if host_err != OK:
+		_set_status("Host error %d on port %d" % [host_err, port], Color(0.95, 0.25, 0.25))
+		_audio.play_alert()
+		return
+
+	var room: Dictionary = await Net.create_bun_room(r_name, port, "HostPanda")
+	if room.is_empty():
+		_set_status("Local lobby started, but Bun backend registration failed.", Color(0.95, 0.6, 0.2))
+	else:
+		_set_status("Room [%s] active on Bun backend! Loading match..." % room.get("code", "OK"), Color(0.2, 0.9, 0.4))
+
+	_save_settings()
+	get_tree().change_scene_to_file(Net.GAME_SCENE)
+
+
+func _on_bun_join_code() -> void:
+	_audio.play_click()
+	var code := _bun_room_code_input.text.strip_edges().to_upper()
+	if code.is_empty():
+		_set_status("Please enter a 4-letter room code (e.g. FARM)", Color(0.95, 0.4, 0.25))
+		_audio.play_alert()
+		return
+
+	_set_status("Looking up room [%s] on Bun backend..." % code, Color(0.95, 0.8, 0.2))
+	var room: Dictionary = await Net.join_bun_room(code)
+	if room.is_empty():
+		_set_status("Room [%s] not found on Bun backend." % code, Color(0.95, 0.3, 0.3))
+		_audio.play_alert()
+		return
+
+	var host_addr: String = room.get("hostAddress", "127.0.0.1")
+	var host_port: int = room.get("port", Net.DEFAULT_PORT)
+	_set_status("Found room [%s] at %s:%d! Connecting..." % [code, host_addr, host_port], Color(0.2, 0.8, 0.5))
+
+	_connecting = true
+	_connect_timer = 0.0
+	_cancel_btn.visible = true
+
+	var err := Net.join(host_addr, host_port)
+	if err != OK:
+		_connecting = false
+		_cancel_btn.visible = false
+		_set_status("Could not connect to room [%s] at %s:%d" % [code, host_addr, host_port], Color(0.95, 0.25, 0.25))
+		_audio.play_alert()
+
+
+func _on_bun_spawn_dedicated() -> void:
+	_audio.play_click()
+	_set_status("Spawning dedicated headless server via Bun backend...", Color(0.95, 0.8, 0.2))
+	var room: Dictionary = await Net.spawn_dedicated_bun_room("Dedicated Arena")
+	if room.is_empty():
+		_set_status("Could not spawn dedicated server. Is Bun backend running?", Color(0.95, 0.3, 0.3))
+		_audio.play_alert()
+		return
+
+	var code: String = room.get("code", "")
+	var host_addr: String = room.get("hostAddress", "127.0.0.1")
+	var host_port: int = room.get("port", 7800)
+	_set_status("Dedicated room [%s] spawned on port %d! Connecting..." % [code, host_port], Color(0.2, 0.9, 0.4))
+
+	_connecting = true
+	_connect_timer = 0.0
+	_cancel_btn.visible = true
+
+	var err := Net.join(host_addr, host_port)
+	if err != OK:
+		_connecting = false
+		_cancel_btn.visible = false
+		_set_status("Could not connect to dedicated room %d" % err, Color(0.95, 0.25, 0.25))
+		_audio.play_alert()
+
+
+func _refresh_bun_rooms() -> void:
+	if not _bun_rooms_container:
+		return
+
+	# Clear existing children
+	for child in _bun_rooms_container.get_children():
+		child.queue_free()
+
+	var loading_lbl := Label.new()
+	loading_lbl.text = "Fetching live lobbies from Bun backend..."
+	loading_lbl.add_theme_font_size_override("font_size", 10)
+	loading_lbl.add_theme_color_override("font_color", Color(0.6, 0.75, 0.85))
+	_bun_rooms_container.add_child(loading_lbl)
+
+	var rooms: Array = await Net.fetch_bun_rooms()
+
+	# Re-clear after await
+	for child in _bun_rooms_container.get_children():
+		child.queue_free()
+
+	if rooms.is_empty():
+		var empty_lbl := Label.new()
+		empty_lbl.text = "No active rooms right now. Create one or launch a dedicated room!"
+		empty_lbl.add_theme_font_size_override("font_size", 10)
+		empty_lbl.add_theme_color_override("font_color", Color(0.55, 0.65, 0.7))
+		_bun_rooms_container.add_child(empty_lbl)
+		return
+
+	for r in rooms:
+		if not r is Dictionary:
+			continue
+		var room_dict: Dictionary = r
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+
+		var code_badge := _create_badge(room_dict.get("code", "----"), Color(0.2, 0.85, 0.5, 0.4))
+		code_badge.custom_minimum_size = Vector2(50, 20)
+		row.add_child(code_badge)
+
+		var name_lbl := Label.new()
+		name_lbl.text = room_dict.get("name", "Arena")
+		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_lbl)
+
+		var count_pill := _create_mini_pill("%d/%d" % [room_dict.get("playerCount", 1), room_dict.get("maxPlayers", 32)])
+		row.add_child(count_pill)
+
+		if room_dict.get("isDedicated", false):
+			var ded_badge := _create_badge("Dedicated", Color(0.3, 0.6, 0.9, 0.4))
+			row.add_child(ded_badge)
+
+		var join_room_btn := Button.new()
+		join_room_btn.text = "Join"
+		join_room_btn.add_theme_font_size_override("font_size", 10)
+		var h_addr: String = room_dict.get("hostAddress", "127.0.0.1")
+		var h_port: int = room_dict.get("port", Net.DEFAULT_PORT)
+		join_room_btn.pressed.connect(func():
+			_audio.play_click()
+			_connecting = true
+			_connect_timer = 0.0
+			_cancel_btn.visible = true
+			_set_status("Joining [%s] at %s:%d..." % [room_dict.get("code", ""), h_addr, h_port], Color(0.95, 0.8, 0.2))
+			Net.join(h_addr, h_port)
+		)
+		row.add_child(join_room_btn)
+
+		_bun_rooms_container.add_child(row)
+
+
+func _test_bun_connection() -> void:
+	_audio.play_click()
+	if _bun_url_input:
+		Net.set_bun_url(_bun_url_input.text)
+	_bun_backend_status_label.text = "Pinging Bun backend..."
+	_bun_backend_status_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))
+
+	var health: Dictionary = await Net.fetch_bun_health()
+	if health.get("status", "") == "ok":
+		_bun_backend_status_label.text = "🟢 Connected! Active rooms: %d • Total players: %d" % [
+			health.get("roomsCount", 0),
+			health.get("totalPlayers", 0)
+		]
+		_bun_backend_status_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.5))
+	else:
+		_bun_backend_status_label.text = "🔴 Could not connect to Bun backend at %s" % Net.bun_url
+		_bun_backend_status_label.add_theme_color_override("font_color", Color(0.95, 0.3, 0.3))
+
+
 # --- SETTINGS PERSISTENCE ---
 func _save_settings() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("network", "address", _address_input.text.strip_edges())
 	cfg.set_value("network", "join_port", _port_input.text.strip_edges())
 	cfg.set_value("network", "host_port", _host_port_input.text.strip_edges())
+	cfg.set_value("network", "bun_url", Net.bun_url)
 	cfg.set_value("game", "map", MapDefs.ORDER[_map_select.selected])
 	cfg.set_value("game", "mode", ModeDefs.ORDER[_mode_select.selected])
 	var audio_class = load("res://scripts/menu_audio.gd")
@@ -835,9 +1241,15 @@ func _load_settings() -> void:
 			_port_input.text = cfg.get_value("network", "join_port")
 		if cfg.has_section_key("network", "host_port"):
 			_host_port_input.text = cfg.get_value("network", "host_port")
+		if cfg.has_section_key("network", "bun_url"):
+			var u: String = cfg.get_value("network", "bun_url")
+			Net.set_bun_url(u)
+			if _bun_url_input:
+				_bun_url_input.text = u
 		_map_select.selected = maxi(MapDefs.ORDER.find(cfg.get_value("game", "map", "")), 0)
 		_mode_select.selected = maxi(ModeDefs.ORDER.find(cfg.get_value("game", "mode", "")), 0)
 		_update_mode_desc()
 		if cfg.has_section_key("audio", "sound_enabled"):
 			var audio_class = load("res://scripts/menu_audio.gd")
 			audio_class.sound_enabled = cfg.get_value("audio", "sound_enabled", true)
+
