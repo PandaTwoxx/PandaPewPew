@@ -70,10 +70,102 @@ func take_damage(amount: int) -> void:
 			position = get_parent().get_parent().random_spawn_point()
 
 
+func _ellipse(c: Vector2, rx: float, ry: float, color: Color) -> void:
+	draw_set_transform(c, aim_angle, Vector2(rx, ry))
+	draw_circle(Vector2.ZERO, 1.0, color)
+	draw_set_transform(Vector2.ZERO, aim_angle)
+
+
+func _eyes(x: float, spread: float, r: float) -> void:
+	for s in [-1.0, 1.0]:
+		draw_circle(Vector2(x, spread * s), r, Color.BLACK)
+		draw_circle(Vector2(x + 0.6, spread * s - 0.6), r * 0.35, Color.WHITE)
+
+
 func _draw() -> void:
-	var color := Color.from_hsv(fmod(name.to_int() * 0.137, 1.0), 0.7, 1.0)
-	draw_circle(Vector2.ZERO, 16, color)
-	draw_line(Vector2.ZERO, Vector2.from_angle(aim_angle) * 26, Color.WHITE, 4)
+	var species := name.to_int() % 4
+	draw_set_transform(Vector2.ZERO, 0)
+	draw_circle(Vector2(3, 6), 17, Color(0, 0, 0, 0.22))
+	draw_set_transform(Vector2.ZERO, aim_angle)
+	match species:
+		0: _draw_pig()
+		1: _draw_cow()
+		2: _draw_sheep()
+		3: _draw_chicken()
+	draw_set_transform(Vector2.ZERO, 0)
 	var w := 40.0
-	draw_rect(Rect2(-w / 2, -30, w, 5), Color(0.2, 0, 0))
-	draw_rect(Rect2(-w / 2, -30, w * clampf(float(health) / MAX_HEALTH, 0, 1), 5), Color.LIME)
+	draw_rect(Rect2(-w / 2 - 1, -33, w + 2, 7), Color(0, 0, 0, 0.6))
+	var frac := clampf(float(health) / MAX_HEALTH, 0, 1)
+	var hc := Color("#5fd35f") if frac > 0.5 else (Color("#f2c230") if frac > 0.25 else Color("#e0452e"))
+	draw_rect(Rect2(-w / 2, -32, w * frac, 5), hc)
+
+
+func _gun() -> void:
+	# Veggie blaster: wooden barrel with a brass muzzle, pointing along the aim.
+	draw_line(Vector2(6, 0), Vector2(30, 0), Color("#5b3a1e"), 7)
+	draw_line(Vector2(6, -1.5), Vector2(30, -1.5), Color("#8a5a2e"), 2)
+	draw_line(Vector2(27, 0), Vector2(31, 0), Color("#d4a017"), 8)
+
+
+func _draw_pig() -> void:
+	var pink := Color("#f4a6b8")
+	var dark := Color("#e2849c")
+	draw_circle(Vector2(-18, 0), 3.5, dark)
+	_ellipse(Vector2.ZERO, 17, 15, pink)
+	_gun()
+	for s in [-1.0, 1.0]:
+		draw_circle(Vector2(4, 10 * s), 4.5, dark)
+	draw_circle(Vector2(10, 0), 11, pink)
+	_ellipse(Vector2(19, 0), 5, 6, Color("#f08aa3"))
+	draw_circle(Vector2(19.5, -2), 1.2, Color("#8a3a52"))
+	draw_circle(Vector2(19.5, 2), 1.2, Color("#8a3a52"))
+	_eyes(12, 5.5, 2.0)
+
+
+func _draw_cow() -> void:
+	var white := Color("#f6f3ee")
+	_ellipse(Vector2.ZERO, 18, 15, white)
+	draw_circle(Vector2(-6, -7), 5, Color("#2a2a2a"))
+	draw_circle(Vector2(-10, 6), 4.5, Color("#2a2a2a"))
+	draw_circle(Vector2(2, 9), 3.5, Color("#2a2a2a"))
+	draw_line(Vector2(-18, 0), Vector2(-24, 4), Color("#2a2a2a"), 2)
+	_gun()
+	for s in [-1.0, 1.0]:
+		draw_circle(Vector2(5, 13 * s), 3, Color("#efe2b0"))
+		draw_circle(Vector2(8, 11 * s), 4.5, white.darkened(0.05))
+	draw_circle(Vector2(10, 0), 11, white)
+	draw_circle(Vector2(13, -5), 4.5, Color("#2a2a2a"))
+	_ellipse(Vector2(19, 0), 5.5, 6.5, Color("#f2b8b0"))
+	draw_circle(Vector2(19.5, -2.2), 1.2, Color("#a85a58"))
+	draw_circle(Vector2(19.5, 2.2), 1.2, Color("#a85a58"))
+	_eyes(13, 5.5, 2.0)
+
+
+func _draw_sheep() -> void:
+	var wool := Color("#f1efe6")
+	var shade := Color("#d9d5c6")
+	draw_circle(Vector2.ZERO, 15, shade)
+	for i in 9:
+		draw_circle(Vector2.from_angle(i * TAU / 9) * 11, 8, wool)
+	draw_circle(Vector2.ZERO, 12, wool)
+	_gun()
+	for s in [-1.0, 1.0]:
+		draw_circle(Vector2(8, 9 * s), 3.5, Color("#3c3c3c"))
+	draw_circle(Vector2(12, 0), 8.5, Color("#3c3c3c"))
+	draw_circle(Vector2(8, 0), 5, wool)
+	_eyes(14, 4.0, 1.8)
+	draw_circle(Vector2(18, 0), 1.6, Color("#222222"))
+
+
+func _draw_chicken() -> void:
+	var white := Color("#fffaf0")
+	for k in 3:
+		draw_circle(Vector2(-17 - k * 1.5, (k - 1) * 6.0), 5, Color("#d9d2c0") if k != 1 else Color("#c9c0aa"))
+	_ellipse(Vector2.ZERO, 15, 13, white)
+	for s in [-1.0, 1.0]:
+		_ellipse(Vector2(-3, 10 * s), 9, 5, Color("#e6dcc4"))
+	_gun()
+	draw_circle(Vector2(11, 0), 8.5, white)
+	_ellipse(Vector2(10, 0), 5, 3, Color("#e0302c"))
+	draw_colored_polygon(PackedVector2Array([Vector2(18, -3.5), Vector2(18, 3.5), Vector2(25, 0)]), Color("#ff9a1f"))
+	_eyes(14, 5, 1.8)
