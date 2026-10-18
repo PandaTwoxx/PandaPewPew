@@ -4,11 +4,16 @@ extends Control
 ## sound synthesis, and seamless multiplayer host/join controls.
 
 const CONFIG_FILE := "user://pandapewpew_settings.cfg"
+const MapDefs := preload("res://scripts/map_defs.gd")
+const ModeDefs := preload("res://scripts/mode_defs.gd")
 
 var _audio: Node
 var _address_input: LineEdit
 var _port_input: LineEdit
 var _host_port_input: LineEdit
+var _map_select: OptionButton
+var _mode_select: OptionButton
+var _mode_desc: Label
 var _status_label: Label
 var _status_dot: ColorRect
 var _cancel_btn: Button
@@ -307,6 +312,24 @@ func _build_play_tab(parent: Control) -> void:
 	port_row.add_child(_host_port_input)
 	host_vbox.add_child(port_row)
 
+	_map_select = OptionButton.new()
+	for id in MapDefs.ORDER:
+		_map_select.add_item(MapDefs.map_name(id))
+	host_vbox.add_child(_labeled_row("Map:", _map_select))
+
+	_mode_select = OptionButton.new()
+	for id in ModeDefs.ORDER:
+		_mode_select.add_item(ModeDefs.MODES[id].name)
+	_mode_select.item_selected.connect(func(_i): _update_mode_desc())
+	host_vbox.add_child(_labeled_row("Mode:", _mode_select))
+
+	_mode_desc = Label.new()
+	_mode_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mode_desc.add_theme_font_size_override("font_size", 11)
+	_mode_desc.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
+	host_vbox.add_child(_mode_desc)
+	_update_mode_desc()
+
 	var host_desc := Label.new()
 	host_desc.text = "Host a match on your machine. Up to 32 players can join."
 	host_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -401,11 +424,30 @@ func _build_play_tab(parent: Control) -> void:
 	join_vbox.add_child(_join_btn)
 
 
+func _labeled_row(text: String, control: Control) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.custom_minimum_size = Vector2(40, 0)
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	row.add_child(lbl)
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	control.add_theme_font_size_override("font_size", 12)
+	row.add_child(control)
+	return row
+
+
+func _update_mode_desc() -> void:
+	_mode_desc.text = ModeDefs.MODES[ModeDefs.ORDER[_mode_select.selected]].desc
+
+
 func _build_guide_tab(parent: Control) -> void:
 	var rows := [
 		{"keys": "W / A / S / D  (or Arrow Keys)", "action": "Move your Panda across the bamboo arena"},
 		{"keys": "Mouse Cursor", "action": "360° Directional Aiming"},
 		{"keys": "Left Mouse Button (Hold)", "action": "Continuous Laser Pew-Pew Blaster"},
+		{"keys": "Tab (Hold)", "action": "Show the scoreboard"},
 		{"keys": "Escape (ESC)", "action": "Leave current match and return to menu"},
 	]
 
@@ -438,7 +480,7 @@ func _build_guide_tab(parent: Control) -> void:
 	parent.add_child(rules_box)
 
 	var rules_lbl := Label.new()
-	rules_lbl.text = "🌾 Farmyard Rules: 100 HP • 20 damage per shot • 10s Veggie Blaster burst with 5s cooldown. Play as Pig, Cow, Sheep, or Chicken!"
+	rules_lbl.text = "🌾 Farmyard Rules: 100 HP • 20 damage per shot • 10s Veggie Blaster burst with 5s cooldown. Dead players respawn after 3s. Modes: Kill Count, Capture the Flag, Conquest."
 	rules_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	rules_lbl.add_theme_font_size_override("font_size", 11)
 	rules_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
@@ -694,6 +736,8 @@ func _join_port_value() -> int:
 func _on_host() -> void:
 	_audio.play_click()
 	var port := _host_port_value()
+	Net.map_id = MapDefs.ORDER[_map_select.selected]
+	Net.mode_id = ModeDefs.ORDER[_mode_select.selected]
 	var err := Net.host(port)
 	if err != OK:
 		_set_status("Host failed (error %d). Port %d may already be in use." % [err, port], Color(0.95, 0.25, 0.25))
@@ -775,6 +819,8 @@ func _save_settings() -> void:
 	cfg.set_value("network", "address", _address_input.text.strip_edges())
 	cfg.set_value("network", "join_port", _port_input.text.strip_edges())
 	cfg.set_value("network", "host_port", _host_port_input.text.strip_edges())
+	cfg.set_value("game", "map", MapDefs.ORDER[_map_select.selected])
+	cfg.set_value("game", "mode", ModeDefs.ORDER[_mode_select.selected])
 	var audio_class = load("res://scripts/menu_audio.gd")
 	cfg.set_value("audio", "sound_enabled", audio_class.sound_enabled)
 	cfg.save(CONFIG_FILE)
@@ -789,6 +835,9 @@ func _load_settings() -> void:
 			_port_input.text = cfg.get_value("network", "join_port")
 		if cfg.has_section_key("network", "host_port"):
 			_host_port_input.text = cfg.get_value("network", "host_port")
+		_map_select.selected = maxi(MapDefs.ORDER.find(cfg.get_value("game", "map", "")), 0)
+		_mode_select.selected = maxi(ModeDefs.ORDER.find(cfg.get_value("game", "mode", "")), 0)
+		_update_mode_desc()
 		if cfg.has_section_key("audio", "sound_enabled"):
 			var audio_class = load("res://scripts/menu_audio.gd")
 			audio_class.sound_enabled = cfg.get_value("audio", "sound_enabled", true)

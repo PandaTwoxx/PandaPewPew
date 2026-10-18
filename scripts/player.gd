@@ -7,9 +7,21 @@ const MAX_HEALTH := 100
 const FIRE_COOLDOWN := 0.25
 const ROUND_TIME := 10.0     # seconds the gun may fire once a round starts
 const GUN_COOLDOWN := 5.0    # seconds it is locked after the round ends
+const SPECIES := ["Pig", "Cow", "Sheep", "Chicken"]
+const ModeDefs := preload("res://scripts/mode_defs.gd")
+const Objectives := preload("res://scripts/objectives.gd")
 
 var aim_angle := 0.0
+# Server-owned state, replicated by StateSync (authority = server) and sent to late joiners on spawn.
 var health := MAX_HEALTH
+var team := -1  # -1 = free-for-all
+var alive := true: set = _set_alive
+var shielded := false  # spawn protection
+var carrying := false  # holding the enemy flag (CTF)
+var kills := 0
+var deaths := 0
+
+var died_at := 0.0  # local time this peer saw us die (drives the respawn countdown)
 var _last_shot := 0.0
 var _round_start := -1.0  # when the current firing round began (-1 = none); server + owner track it
 
@@ -17,21 +29,71 @@ var _round_start := -1.0  # when the current firing round began (-1 = none); ser
 func _enter_tree() -> void:
 	# Node name is the owning peer id (set by the spawn function).
 	set_multiplayer_authority(name.to_int())
+	$StateSync.set_multiplayer_authority(1)
 
 
 func _ready() -> void:
+	_set_alive(alive)
 	if is_multiplayer_authority() and not Net.dedicated:
 		var cam := Camera2D.new()
+		cam.name = "Camera"
 		add_child(cam)
 		cam.make_current()
 		cam.limit_left = 0
 		cam.limit_top = 0
-		cam.limit_right = 1600
-		cam.limit_bottom = 900
+		apply_arena()
+
+
+func _game() -> Node:
+	return get_parent().get_parent()
+
+
+## Camera limits follow the map, which may load after this player spawns.
+func apply_arena() -> void:
+	var cam := get_node_or_null("Camera") as Camera2D
+	if cam:
+		cam.limit_right = int(_game().arena.size.x)
+		cam.limit_bottom = int(_game().arena.size.y)
+
+
+func display_name() -> String:
+	return "%s #%d" % [SPECIES[name.to_int() % 4], name.to_int() % 1000]
+
+
+func _can_act() -> bool:
+	return alive and _game().state.phase == _game().state.PLAYING
+
+
+func _set_alive(v: bool) -> void:
+	if alive and not v:
+		died_at = _now()
+	alive = v
+	var shape := get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if shape:
+		shape.set_deferred("disabled", not v)  # bullets and bodies pass through the dead
+
+
+func reset_gun() -> void:
+	_round_start = -1.0
+	_last_shot = 0.0
+
+
+## Server -> owner: teleport to a freshly picked spawn point (position is owner-authoritative).
+@rpc("any_peer", "call_local", "reliable")
+func respawn_at(pos: Vector2) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if sender != 0 and sender != 1:
+		return
+	position = pos
+	velocity = Vector2.ZERO
+	reset_gun()
 
 
 func _physics_process(_delta: float) -> void:
 	if not is_multiplayer_authority():
+		return
+	if not _can_act():
+		velocity = Vector2.ZERO
 		return
 	velocity = Input.get_vector("move_left", "move_right", "move_up", "move_down") * SPEED
 	move_and_slide()
@@ -58,7 +120,7 @@ func _gun_phase() -> int:
 func _process(_delta: float) -> void:
 	queue_redraw()
 	if is_multiplayer_authority() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
-			and _gun_phase() != 2:
+			and _can_act() and _gun_phase() != 2:
 		shoot.rpc_id(1, Vector2.from_angle(aim_angle))
 
 
@@ -77,7 +139,7 @@ func shoot(dir: Vector2) -> void:
 	if sender != 0 and sender != name.to_int():
 		return
 	var now := _now()
-	if now - _last_shot < FIRE_COOLDOWN or dir.length() < 0.5:
+	if now - _last_shot < FIRE_COOLDOWN or dir.length() < 0.5 or not _can_act():
 		return
 	var phase := _gun_phase()
 	if phase == 2:
@@ -87,21 +149,8 @@ func shoot(dir: Vector2) -> void:
 		if name.to_int() != 1:
 			_round_started.rpc_id(name.to_int())
 	_last_shot = now
-	get_parent().get_parent().spawn_bullet(
+	_game().spawn_bullet(
 		global_position + dir.normalized() * 24, dir.normalized(), name.to_int())
-
-
-## Called by the server (via rpc) on every peer to apply damage.
-@rpc("any_peer", "call_local", "reliable")
-func take_damage(amount: int) -> void:
-	var sender := multiplayer.get_remote_sender_id()
-	if sender != 0 and sender != 1:
-		return
-	health -= amount
-	if health <= 0:
-		health = MAX_HEALTH
-		if is_multiplayer_authority():
-			position = get_parent().get_parent().random_spawn_point()
 
 
 func _ellipse(c: Vector2, rx: float, ry: float, color: Color) -> void:
@@ -116,7 +165,20 @@ func _eyes(x: float, spread: float, r: float) -> void:
 		draw_circle(Vector2(x + 0.6, spread * s - 0.6), r * 0.35, Color.WHITE)
 
 
+func _draw_grave() -> void:
+	draw_set_transform(Vector2.ZERO, 0)
+	var col := ModeDefs.team_color(team) if team >= 0 else Color("#9aa0a6")
+	draw_rect(Rect2(-9, -8, 18, 18), Color("#8d9399"))
+	draw_circle(Vector2(0, -8), 9, Color("#8d9399"))
+	draw_rect(Rect2(-9, 8, 18, 3), col)
+	draw_line(Vector2(0, -12), Vector2(0, 2), Color("#5b6065"), 2.0)
+	draw_line(Vector2(-4, -7), Vector2(4, -7), Color("#5b6065"), 2.0)
+
+
 func _draw() -> void:
+	if not alive:
+		_draw_grave()
+		return
 	var species := name.to_int() % 4
 	draw_set_transform(Vector2.ZERO, 0)
 	draw_circle(Vector2(3, 6), 17, Color(0, 0, 0, 0.22))
@@ -127,6 +189,13 @@ func _draw() -> void:
 		2: _draw_sheep()
 		3: _draw_chicken()
 	draw_set_transform(Vector2.ZERO, 0)
+	if team >= 0:
+		draw_arc(Vector2.ZERO, 21, 0, TAU, 32, ModeDefs.team_color(team), 3.0)
+	if shielded:
+		var pulse := 0.5 + 0.5 * sin(_now() * 10.0)
+		draw_arc(Vector2.ZERO, 26, 0, TAU, 32, Color(0.6, 0.9, 1.0, 0.45 + 0.4 * pulse), 3.0)
+	if carrying:
+		Objectives.draw_flag(self, Vector2(22, -6), ModeDefs.team_color(1 - team), 0.8)
 	var w := 40.0
 	draw_rect(Rect2(-w / 2 - 1, -33, w + 2, 7), Color(0, 0, 0, 0.6))
 	var frac := clampf(float(health) / MAX_HEALTH, 0, 1)
