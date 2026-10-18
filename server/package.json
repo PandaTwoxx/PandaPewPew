@@ -1,0 +1,14 @@
+{
+  "name": "pandapewpew-backend",
+  "version": "1.0.0",
+  "description": "High-performance Bun.js multiplayer backend and lobby orchestrator for PandaPewPew",
+  "main": "src/server.ts",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
