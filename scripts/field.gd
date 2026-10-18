@@ -2,6 +2,7 @@ extends Node2D
 ## Static farm-field backdrop, drawn procedurally. Seeded so every peer sees the same field.
 
 var size := Vector2(1600, 900)
+var theme_def := {"grass": Color("#6aa84f"), "path": true, "flora": 1.0}
 
 
 func _ready() -> void:
@@ -9,15 +10,17 @@ func _ready() -> void:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(-200, -200, size.x + 400, size.y + 400), Color("#6aa84f"))
+	draw_rect(Rect2(-200, -200, size.x + 400, size.y + 400), Color(theme_def.grass))
 	for i in range(0, int(ceil(size.x / 100.0)), 2):
 		draw_rect(Rect2(i * 100, 0, 100, size.y), Color(0, 0, 0, 0.045))
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20240607
-	_draw_path()
+	if theme_def.path:
+		_draw_path()
 
-	for i in 380:
+	var area: float = size.x * size.y / (1600.0 * 900.0) * theme_def.flora
+	for i in int(380 * area):
 		var p := Vector2(rng.randf_range(10, size.x - 10), rng.randf_range(10, size.y - 10))
 		var c := Color("#4f8a3a") if rng.randf() < 0.6 else Color("#7fbf5f")
 		draw_line(p, p + Vector2(-3, -6), c, 1.5)
@@ -25,7 +28,7 @@ func _draw() -> void:
 		draw_line(p, p + Vector2(3, -6), c, 1.5)
 
 	var petals := [Color("#ffffff"), Color("#ffd93b"), Color("#ff7aa8"), Color("#b58cff"), Color("#ff8a3d")]
-	for i in 110:
+	for i in int(110 * area):
 		var p := Vector2(rng.randf_range(20, size.x - 20), rng.randf_range(20, size.y - 20))
 		var c: Color = petals[rng.randi() % petals.size()]
 		for k in 5:
