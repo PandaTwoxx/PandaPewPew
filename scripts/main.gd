@@ -1,62 +1,53 @@
 extends Control
-## Main menu: host a game or join one.
+## Modern, polished Home Screen for PandaPewPew.
+## Features procedural graphics, mascot eye tracking, dynamic background,
+## sound synthesis, and seamless multiplayer host/join controls.
 
-var _address: LineEdit
-var _port: LineEdit
-var _status: Label
+const CONFIG_FILE := "user://pandapewpew_settings.cfg"
+
+var _audio: Node
+var _address_input: LineEdit
+var _port_input: LineEdit
+var _host_port_input: LineEdit
+var _status_label: Label
+var _status_dot: ColorRect
+var _cancel_btn: Button
+var _host_btn: Button
+var _join_btn: Button
+
+# Tab contents
+var _tab_play: Control
+var _tab_guide: Control
+var _tab_settings: Control
+var _tab_buttons: Array[Button] = []
+
+var _connecting: bool = false
+var _connect_timer: float = 0.0
 
 
 func _ready() -> void:
-	var bg := ColorRect.new()
-	bg.color = Color("#6aa84f")
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# 1. Background
+	var bg_script = load("res://scripts/menu_background.gd")
+	var bg = Control.new()
+	bg.set_script(bg_script)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
-	var box := VBoxContainer.new()
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	box.custom_minimum_size = Vector2(300, 0)
-	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.grow_vertical = Control.GROW_DIRECTION_BOTH
-	add_child(box)
+	# 2. Audio Synthesizer
+	var audio_script = load("res://scripts/menu_audio.gd")
+	_audio = Node.new()
+	_audio.set_script(audio_script)
+	add_child(_audio)
 
-	var title := Label.new()
-	title.text = "PandaPewPew"
-	title.add_theme_font_size_override("font_size", 52)
-	title.add_theme_color_override("font_color", Color("#fff3cf"))
-	title.add_theme_color_override("font_outline_color", Color("#5b1d1a"))
-	title.add_theme_constant_override("outline_size", 12)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
+	# 3. Main UI Layout
+	_build_ui()
 
-	_address = LineEdit.new()
-	_address.text = "127.0.0.1"
-	_address.placeholder_text = "Server address"
-	box.add_child(_address)
+	# 4. Load persisted preferences
+	_load_settings()
 
-	_port = LineEdit.new()
-	_port.text = str(Net.DEFAULT_PORT)
-	_port.placeholder_text = "Port"
-	box.add_child(_port)
-
-	var host_btn := Button.new()
-	host_btn.text = "Host"
-	host_btn.pressed.connect(_on_host)
-	box.add_child(host_btn)
-
-	var join_btn := Button.new()
-	join_btn.text = "Join"
-	join_btn.pressed.connect(_on_join)
-	box.add_child(join_btn)
-
-	var sub := Label.new()
-	sub.text = "Farmyard Fracas"
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(sub)
-	box.move_child(sub, 1)
-
-	_status = Label.new()
-	box.add_child(_status)
-
+	# 5. Multiplayer signal connections
 	multiplayer.connected_to_server.connect(_on_connected)
 	multiplayer.connection_failed.connect(_on_failed)
 
@@ -68,31 +59,736 @@ func _exit_tree() -> void:
 		multiplayer.connection_failed.disconnect(_on_failed)
 
 
-func _port_value() -> int:
-	var p := _port.text.to_int()
+func _process(delta: float) -> void:
+	if _connecting:
+		_connect_timer += delta
+		var dots := ".".repeat(int(_connect_timer * 3.0) % 4)
+		_status_label.text = "Connecting to %s:%d%s" % [
+			_address_input.text.strip_edges(),
+			_join_port_value(),
+			dots
+		]
+
+
+func _build_ui() -> void:
+	# Root margin container to keep away from screen edges
+	var root_margin := MarginContainer.new()
+	root_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root_margin.add_theme_constant_override("margin_left", 24)
+	root_margin.add_theme_constant_override("margin_right", 24)
+	root_margin.add_theme_constant_override("margin_top", 16)
+	root_margin.add_theme_constant_override("margin_bottom", 16)
+	add_child(root_margin)
+
+	# Vertical stack: Top bar, Center Area, Footer
+	var main_vbox := VBoxContainer.new()
+	main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_vbox.alignment = BoxContainer.ALIGNMENT_BEGIN
+	main_vbox.add_theme_constant_override("separation", 10)
+	root_margin.add_child(main_vbox)
+
+	# --- TOP BAR ---
+	var top_bar := HBoxContainer.new()
+	top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main_vbox.add_child(top_bar)
+
+	var version_badge := _create_badge("PANDA PEW PEW • MULTIPLAYER ARENA", Color(0.15, 0.75, 0.45, 0.35))
+	top_bar.add_child(version_badge)
+
+	var spacer_top := Control.new()
+	spacer_top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(spacer_top)
+
+	# Sound toggle button
+	var sound_btn := _create_pill_button("SFX: ON")
+	sound_btn.pressed.connect(func():
+		var audio_class = load("res://scripts/menu_audio.gd")
+		audio_class.sound_enabled = not audio_class.sound_enabled
+		sound_btn.text = "SFX: ON" if audio_class.sound_enabled else "SFX: OFF"
+		_audio.play_click()
+		_save_settings()
+	)
+	top_bar.add_child(sound_btn)
+
+	# Fullscreen button
+	var fs_btn := _create_pill_button("⛶ Fullscreen")
+	fs_btn.pressed.connect(func():
+		_audio.play_click()
+		var mode := DisplayServer.window_get_mode()
+		if mode == DisplayServer.WINDOW_MODE_FULLSCREEN:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		else:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	)
+	top_bar.add_child(fs_btn)
+
+	# --- HERO SECTION (Mascot + Title) ---
+	var hero_box := VBoxContainer.new()
+	hero_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hero_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	hero_box.add_theme_constant_override("separation", 3)
+	main_vbox.add_child(hero_box)
+
+	# Panda Mascot Node
+	var mascot_script = load("res://scripts/panda_mascot.gd")
+	var mascot = Control.new()
+	mascot.set_script(mascot_script)
+	mascot.custom_minimum_size = Vector2(130, 115)
+	mascot.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	hero_box.add_child(mascot)
+
+	# Title Label
+	var title_lbl := Label.new()
+	title_lbl.text = "PANDA PEW PEW"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 38)
+	title_lbl.add_theme_color_override("font_color", Color(0.96, 0.99, 0.98))
+	title_lbl.add_theme_color_override("font_shadow_color", Color(0.05, 0.4, 0.25, 0.75))
+	title_lbl.add_theme_constant_override("shadow_offset_y", 3)
+	title_lbl.add_theme_constant_override("shadow_outline_size", 6)
+	hero_box.add_child(title_lbl)
+
+	# Subtitle
+	var sub_lbl := Label.new()
+	sub_lbl.text = "FARMYARD FRACAS • 2D BATTLE ARENA"
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 12)
+	sub_lbl.add_theme_color_override("font_color", Color(0.4, 0.88, 0.65))
+	hero_box.add_child(sub_lbl)
+
+	# --- CENTER CARD ---
+	var center_wrap := CenterContainer.new()
+	center_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_vbox.add_child(center_wrap)
+
+	var card_panel := PanelContainer.new()
+	card_panel.custom_minimum_size = Vector2(550, 310)
+	var card_style := StyleBoxFlat.new()
+	card_style.bg_color = Color(0.08, 0.12, 0.16, 0.92)
+	card_style.border_color = Color(0.18, 0.7, 0.42, 0.45)
+	card_style.set_border_width_all(2)
+	card_style.set_corner_radius_all(14)
+	card_style.shadow_color = Color(0, 0, 0, 0.45)
+	card_style.shadow_size = 16
+	card_style.shadow_offset = Vector2(0, 6)
+	card_style.content_margin_left = 20
+	card_style.content_margin_right = 20
+	card_style.content_margin_top = 16
+	card_style.content_margin_bottom = 16
+	card_panel.add_theme_stylebox_override("panel", card_style)
+	center_wrap.add_child(card_panel)
+
+	var card_vbox := VBoxContainer.new()
+	card_vbox.add_theme_constant_override("separation", 14)
+	card_panel.add_child(card_vbox)
+
+	# --- NAVIGATION TABS ---
+	var tabs_bar := HBoxContainer.new()
+	tabs_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs_bar.add_theme_constant_override("separation", 8)
+	card_vbox.add_child(tabs_bar)
+
+	var tab_play_btn := _create_tab_button("⚔️ Play Match", true)
+	var tab_guide_btn := _create_tab_button("📖 How to Play", false)
+	var tab_settings_btn := _create_tab_button("⚙️ Settings", false)
+
+	_tab_buttons = [tab_play_btn, tab_guide_btn, tab_settings_btn]
+	for b in _tab_buttons:
+		tabs_bar.add_child(b)
+
+	tab_play_btn.pressed.connect(func(): _switch_tab(0))
+	tab_guide_btn.pressed.connect(func(): _switch_tab(1))
+	tab_settings_btn.pressed.connect(func(): _switch_tab(2))
+
+	# Container for the tab bodies
+	var tab_stack := MarginContainer.new()
+	tab_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card_vbox.add_child(tab_stack)
+
+	# --- TAB 1: PLAY ---
+	_tab_play = VBoxContainer.new()
+	_tab_play.add_theme_constant_override("separation", 12)
+	tab_stack.add_child(_tab_play)
+	_build_play_tab(_tab_play)
+
+	# --- TAB 2: GUIDE ---
+	_tab_guide = VBoxContainer.new()
+	_tab_guide.visible = false
+	_tab_guide.add_theme_constant_override("separation", 10)
+	tab_stack.add_child(_tab_guide)
+	_build_guide_tab(_tab_guide)
+
+	# --- TAB 3: SETTINGS ---
+	_tab_settings = VBoxContainer.new()
+	_tab_settings.visible = false
+	_tab_settings.add_theme_constant_override("separation", 10)
+	tab_stack.add_child(_tab_settings)
+	_build_settings_tab(_tab_settings)
+
+	# --- STATUS BAR (Persistent inside card) ---
+	var status_container := PanelContainer.new()
+	var status_bg := StyleBoxFlat.new()
+	status_bg.bg_color = Color(0.05, 0.08, 0.11, 0.8)
+	status_bg.set_corner_radius_all(8)
+	status_bg.content_margin_left = 12
+	status_bg.content_margin_right = 12
+	status_bg.content_margin_top = 8
+	status_bg.content_margin_bottom = 8
+	status_container.add_theme_stylebox_override("panel", status_bg)
+	card_vbox.add_child(status_container)
+
+	var status_hbox := HBoxContainer.new()
+	status_hbox.alignment = BoxContainer.ALIGNMENT_BEGIN
+	status_hbox.add_theme_constant_override("separation", 10)
+	status_container.add_child(status_hbox)
+
+	_status_dot = ColorRect.new()
+	_status_dot.custom_minimum_size = Vector2(10, 10)
+	_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_status_dot.color = Color(0.2, 0.9, 0.4) # Green ready
+	status_hbox.add_child(_status_dot)
+
+	_status_label = Label.new()
+	_status_label.text = "Ready to fight! Host a room or join a server."
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_label.add_theme_font_size_override("font_size", 12)
+	_status_label.add_theme_color_override("font_color", Color(0.75, 0.85, 0.92))
+	status_hbox.add_child(_status_label)
+
+	_cancel_btn = Button.new()
+	_cancel_btn.text = "Cancel"
+	_cancel_btn.visible = false
+	_cancel_btn.add_theme_font_size_override("font_size", 11)
+	_cancel_btn.pressed.connect(_on_cancel)
+	_cancel_btn.mouse_entered.connect(_audio.play_hover)
+	status_hbox.add_child(_cancel_btn)
+
+
+func _build_play_tab(parent: Control) -> void:
+	var grid := HBoxContainer.new()
+	grid.add_theme_constant_override("separation", 16)
+	parent.add_child(grid)
+
+	# --- LEFT COLUMN: HOST ---
+	var host_panel := PanelContainer.new()
+	host_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var host_style := StyleBoxFlat.new()
+	host_style.bg_color = Color(0.12, 0.17, 0.22, 0.75)
+	host_style.set_corner_radius_all(10)
+	host_style.border_color = Color(0.15, 0.6, 0.35, 0.35)
+	host_style.set_border_width_all(1)
+	host_style.content_margin_left = 14
+	host_style.content_margin_right = 14
+	host_style.content_margin_top = 12
+	host_style.content_margin_bottom = 12
+	host_panel.add_theme_stylebox_override("panel", host_style)
+	grid.add_child(host_panel)
+
+	var host_vbox := VBoxContainer.new()
+	host_vbox.add_theme_constant_override("separation", 10)
+	host_panel.add_child(host_vbox)
+
+	var host_title := Label.new()
+	host_title.text = "CREATE SERVER"
+	host_title.add_theme_font_size_override("font_size", 14)
+	host_title.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
+	host_vbox.add_child(host_title)
+
+	var port_row := HBoxContainer.new()
+	var port_lbl := Label.new()
+	port_lbl.text = "Port:"
+	port_lbl.add_theme_font_size_override("font_size", 12)
+	port_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	port_row.add_child(port_lbl)
+
+	_host_port_input = _create_line_edit(str(Net.DEFAULT_PORT), "Port")
+	port_row.add_child(_host_port_input)
+	host_vbox.add_child(port_row)
+
+	var host_desc := Label.new()
+	host_desc.text = "Host a match on your machine. Up to 32 players can join."
+	host_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	host_desc.add_theme_font_size_override("font_size", 11)
+	host_desc.add_theme_color_override("font_color", Color(0.55, 0.65, 0.7))
+	host_vbox.add_child(host_desc)
+
+	var host_spacer := Control.new()
+	host_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host_vbox.add_child(host_spacer)
+
+	_host_btn = _create_action_button("🚀 Host Game", Color(0.12, 0.72, 0.42), Color(0.15, 0.85, 0.48))
+	_host_btn.pressed.connect(_on_host)
+	host_vbox.add_child(_host_btn)
+
+	# --- RIGHT COLUMN: JOIN ---
+	var join_panel := PanelContainer.new()
+	join_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var join_style := StyleBoxFlat.new()
+	join_style.bg_color = Color(0.12, 0.17, 0.22, 0.75)
+	join_style.set_corner_radius_all(10)
+	join_style.border_color = Color(0.15, 0.55, 0.85, 0.35)
+	join_style.set_border_width_all(1)
+	join_style.content_margin_left = 14
+	join_style.content_margin_right = 14
+	join_style.content_margin_top = 12
+	join_style.content_margin_bottom = 12
+	join_panel.add_theme_stylebox_override("panel", join_style)
+	grid.add_child(join_panel)
+
+	var join_vbox := VBoxContainer.new()
+	join_vbox.add_theme_constant_override("separation", 8)
+	join_panel.add_child(join_vbox)
+
+	var join_title := Label.new()
+	join_title.text = "JOIN SERVER"
+	join_title.add_theme_font_size_override("font_size", 14)
+	join_title.add_theme_color_override("font_color", Color(0.38, 0.8, 1.0))
+	join_vbox.add_child(join_title)
+
+	var ip_row := HBoxContainer.new()
+	var ip_lbl := Label.new()
+	ip_lbl.text = "IP:"
+	ip_lbl.custom_minimum_size = Vector2(32, 0)
+	ip_lbl.add_theme_font_size_override("font_size", 12)
+	ip_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	ip_row.add_child(ip_lbl)
+
+	_address_input = _create_line_edit("127.0.0.1", "Server Address")
+	_address_input.text_submitted.connect(func(_t): _on_join())
+	ip_row.add_child(_address_input)
+	join_vbox.add_child(ip_row)
+
+	var join_port_row := HBoxContainer.new()
+	var join_port_lbl := Label.new()
+	join_port_lbl.text = "Port:"
+	join_port_lbl.custom_minimum_size = Vector2(32, 0)
+	join_port_lbl.add_theme_font_size_override("font_size", 12)
+	join_port_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	join_port_row.add_child(join_port_lbl)
+
+	_port_input = _create_line_edit(str(Net.DEFAULT_PORT), "Port")
+	_port_input.text_submitted.connect(func(_t): _on_join())
+	join_port_row.add_child(_port_input)
+	join_vbox.add_child(join_port_row)
+
+	# Quick connect preset pills
+	var pills_row := HBoxContainer.new()
+	pills_row.add_theme_constant_override("separation", 6)
+	join_vbox.add_child(pills_row)
+
+	var pill_local := _create_mini_pill("Localhost")
+	pill_local.pressed.connect(func():
+		_address_input.text = "127.0.0.1"
+		_audio.play_click()
+	)
+	pills_row.add_child(pill_local)
+
+	var pill_default_port := _create_mini_pill("Reset Port")
+	pill_default_port.pressed.connect(func():
+		_port_input.text = str(Net.DEFAULT_PORT)
+		_audio.play_click()
+	)
+	pills_row.add_child(pill_default_port)
+
+	var join_spacer := Control.new()
+	join_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	join_vbox.add_child(join_spacer)
+
+	_join_btn = _create_action_button("🎯 Join Match", Color(0.12, 0.52, 0.88), Color(0.18, 0.65, 1.0))
+	_join_btn.pressed.connect(_on_join)
+	join_vbox.add_child(_join_btn)
+
+
+func _build_guide_tab(parent: Control) -> void:
+	var rows := [
+		{"keys": "W / A / S / D  (or Arrow Keys)", "action": "Move your Panda across the bamboo arena"},
+		{"keys": "Mouse Cursor", "action": "360° Directional Aiming"},
+		{"keys": "Left Mouse Button (Hold)", "action": "Continuous Laser Pew-Pew Blaster"},
+		{"keys": "Escape (ESC)", "action": "Leave current match and return to menu"},
+	]
+
+	for r in rows:
+		var item := HBoxContainer.new()
+		item.add_theme_constant_override("separation", 12)
+
+		var badge := _create_badge(r["keys"], Color(0.18, 0.55, 0.85, 0.35))
+		badge.custom_minimum_size = Vector2(170, 24)
+		item.add_child(badge)
+
+		var desc := Label.new()
+		desc.text = r["action"]
+		desc.add_theme_font_size_override("font_size", 12)
+		desc.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
+		desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		item.add_child(desc)
+
+		parent.add_child(item)
+
+	var rules_box := PanelContainer.new()
+	var rules_style := StyleBoxFlat.new()
+	rules_style.bg_color = Color(0.1, 0.14, 0.18, 0.6)
+	rules_style.set_corner_radius_all(8)
+	rules_style.content_margin_left = 10
+	rules_style.content_margin_right = 10
+	rules_style.content_margin_top = 8
+	rules_style.content_margin_bottom = 8
+	rules_box.add_theme_stylebox_override("panel", rules_style)
+	parent.add_child(rules_box)
+
+	var rules_lbl := Label.new()
+	rules_lbl.text = "🌾 Farmyard Rules: 100 HP • 20 damage per shot • 10s Veggie Blaster burst with 5s cooldown. Play as Pig, Cow, Sheep, or Chicken!"
+	rules_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rules_lbl.add_theme_font_size_override("font_size", 11)
+	rules_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
+	rules_box.add_child(rules_lbl)
+
+
+func _build_settings_tab(parent: Control) -> void:
+	var desc := Label.new()
+	desc.text = "Multiplayer & System Preferences"
+	desc.add_theme_font_size_override("font_size", 13)
+	desc.add_theme_color_override("font_color", Color(0.8, 0.9, 0.95))
+	parent.add_child(desc)
+
+	# Dedicated server helper block
+	var dedicated_box := PanelContainer.new()
+	var d_style := StyleBoxFlat.new()
+	d_style.bg_color = Color(0.05, 0.08, 0.12, 0.85)
+	d_style.border_color = Color(0.2, 0.4, 0.6, 0.4)
+	d_style.set_border_width_all(1)
+	d_style.set_corner_radius_all(8)
+	d_style.content_margin_left = 12
+	d_style.content_margin_right = 12
+	d_style.content_margin_top = 10
+	d_style.content_margin_bottom = 10
+	dedicated_box.add_theme_stylebox_override("panel", d_style)
+	parent.add_child(dedicated_box)
+
+	var d_vbox := VBoxContainer.new()
+	d_vbox.add_theme_constant_override("separation", 6)
+	dedicated_box.add_child(d_vbox)
+
+	var d_title := Label.new()
+	d_title.text = "Dedicated Headless Server Command:"
+	d_title.add_theme_font_size_override("font_size", 11)
+	d_title.add_theme_color_override("font_color", Color(0.4, 0.8, 0.65))
+	d_vbox.add_child(d_title)
+
+	var cmd_hbox := HBoxContainer.new()
+	d_vbox.add_child(cmd_hbox)
+
+	var cmd_lbl := LineEdit.new()
+	cmd_lbl.editable = false
+	cmd_lbl.text = "godot --headless --path . -- --server --port=7777"
+	cmd_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cmd_lbl.add_theme_font_size_override("font_size", 11)
+	cmd_hbox.add_child(cmd_lbl)
+
+	var copy_btn := Button.new()
+	copy_btn.text = "Copy"
+	copy_btn.add_theme_font_size_override("font_size", 11)
+	copy_btn.pressed.connect(func():
+		DisplayServer.clipboard_set(cmd_lbl.text)
+		_audio.play_click()
+		copy_btn.text = "Copied!"
+		get_tree().create_timer(1.5).timeout.connect(func(): copy_btn.text = "Copy")
+	)
+	cmd_hbox.add_child(copy_btn)
+
+	# Engine info
+	var info_lbl := Label.new()
+	info_lbl.text = "Engine: Godot 4.3+ • ENet Synchronizer & Replication • Authoritative Server"
+	info_lbl.add_theme_font_size_override("font_size", 10)
+	info_lbl.add_theme_color_override("font_color", Color(0.5, 0.6, 0.65))
+	parent.add_child(info_lbl)
+
+
+# --- TAB SWITCHING ---
+func _switch_tab(index: int) -> void:
+	_audio.play_click()
+	_tab_play.visible = (index == 0)
+	_tab_guide.visible = (index == 1)
+	_tab_settings.visible = (index == 2)
+
+	for i in range(_tab_buttons.size()):
+		var btn := _tab_buttons[i]
+		var is_active := (i == index)
+		_style_tab_button(btn, is_active)
+
+
+# --- UI HELPERS ---
+func _create_line_edit(initial_text: String, placeholder: String) -> LineEdit:
+	var edit := LineEdit.new()
+	edit.text = initial_text
+	edit.placeholder_text = placeholder
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.add_theme_font_size_override("font_size", 12)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.09, 0.12, 0.9)
+	style.border_color = Color(0.25, 0.45, 0.55, 0.6)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+
+	var focus_style := style.duplicate() as StyleBoxFlat
+	focus_style.border_color = Color(0.2, 0.85, 0.5)
+	focus_style.set_border_width_all(2)
+
+	edit.add_theme_stylebox_override("normal", style)
+	edit.add_theme_stylebox_override("focus", focus_style)
+	return edit
+
+
+func _create_action_button(text: String, normal_col: Color, hover_col: Color) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.custom_minimum_size = Vector2(0, 36)
+	btn.add_theme_font_size_override("font_size", 13)
+
+	var normal_style := StyleBoxFlat.new()
+	normal_style.bg_color = normal_col
+	normal_style.set_corner_radius_all(8)
+	normal_style.shadow_color = Color(normal_col.r, normal_col.g, normal_col.b, 0.35)
+	normal_style.shadow_size = 6
+
+	var hover_style := StyleBoxFlat.new()
+	hover_style.bg_color = hover_col
+	hover_style.set_corner_radius_all(8)
+	hover_style.shadow_color = Color(hover_col.r, hover_col.g, hover_col.b, 0.5)
+	hover_style.shadow_size = 10
+
+	var pressed_style := StyleBoxFlat.new()
+	pressed_style.bg_color = normal_col.darkened(0.2)
+	pressed_style.set_corner_radius_all(8)
+
+	btn.add_theme_stylebox_override("normal", normal_style)
+	btn.add_theme_stylebox_override("hover", hover_style)
+	btn.add_theme_stylebox_override("pressed", pressed_style)
+
+	btn.mouse_entered.connect(func():
+		_audio.play_hover()
+		var tw := create_tween()
+		tw.tween_property(btn, "scale", Vector2(1.02, 1.02), 0.08)
+	)
+	btn.mouse_exited.connect(func():
+		var tw := create_tween()
+		tw.tween_property(btn, "scale", Vector2(1.0, 1.0), 0.08)
+	)
+	return btn
+
+
+func _create_tab_button(text: String, active: bool) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.custom_minimum_size = Vector2(110, 28)
+	btn.add_theme_font_size_override("font_size", 12)
+	_style_tab_button(btn, active)
+	btn.mouse_entered.connect(_audio.play_hover)
+	return btn
+
+
+func _style_tab_button(btn: Button, active: bool) -> void:
+	var style := StyleBoxFlat.new()
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+
+	if active:
+		style.bg_color = Color(0.18, 0.65, 0.42, 0.85)
+		style.border_color = Color(0.4, 0.95, 0.65)
+		style.set_border_width_all(1)
+		btn.add_theme_color_override("font_color", Color.WHITE)
+	else:
+		style.bg_color = Color(0.1, 0.14, 0.18, 0.6)
+		style.border_color = Color(0.2, 0.28, 0.35, 0.4)
+		style.set_border_width_all(1)
+		btn.add_theme_color_override("font_color", Color(0.65, 0.72, 0.8))
+
+	btn.add_theme_stylebox_override("normal", style)
+	btn.add_theme_stylebox_override("hover", style)
+	btn.add_theme_stylebox_override("pressed", style)
+	btn.add_theme_stylebox_override("focus", style)
+
+
+func _create_pill_button(text: String) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.add_theme_font_size_override("font_size", 11)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.18, 0.24, 0.7)
+	style.border_color = Color(0.25, 0.4, 0.5, 0.5)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(12)
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 3
+	style.content_margin_bottom = 3
+	btn.add_theme_stylebox_override("normal", style)
+
+	var h_style := style.duplicate() as StyleBoxFlat
+	h_style.bg_color = Color(0.18, 0.28, 0.36, 0.9)
+	btn.add_theme_stylebox_override("hover", h_style)
+	btn.mouse_entered.connect(_audio.play_hover)
+	return btn
+
+
+func _create_mini_pill(text: String) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.add_theme_font_size_override("font_size", 10)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.15, 0.22, 0.3, 0.6)
+	style.border_color = Color(0.25, 0.45, 0.6, 0.4)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 6
+	style.content_margin_right = 6
+	style.content_margin_top = 2
+	style.content_margin_bottom = 2
+	btn.add_theme_stylebox_override("normal", style)
+	btn.mouse_entered.connect(_audio.play_hover)
+	return btn
+
+
+func _create_badge(text: String, border_color: Color) -> PanelContainer:
+	var p := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.1, 0.14, 0.75)
+	style.border_color = border_color
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 3
+	style.content_margin_bottom = 3
+	p.add_theme_stylebox_override("panel", style)
+
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 0.9))
+	p.add_child(lbl)
+	return p
+
+
+# --- NETWORKING LOGIC ---
+func _host_port_value() -> int:
+	var p := _host_port_input.text.to_int()
+	return p if p > 0 else Net.DEFAULT_PORT
+
+
+func _join_port_value() -> int:
+	var p := _port_input.text.to_int()
 	return p if p > 0 else Net.DEFAULT_PORT
 
 
 func _on_host() -> void:
-	var err := Net.host(_port_value())
+	_audio.play_click()
+	var port := _host_port_value()
+	var err := Net.host(port)
 	if err != OK:
-		_status.text = "Host failed (error %d)" % err
+		_set_status("Host failed (error %d). Port %d may already be in use." % [err, port], Color(0.95, 0.25, 0.25))
+		_audio.play_alert()
 		return
+
+	_save_settings()
+	_set_status("Lobby hosted on port %d! Loading arena..." % port, Color(0.2, 0.9, 0.4))
 	get_tree().change_scene_to_file(Net.GAME_SCENE)
 
 
 func _on_join() -> void:
-	var err := Net.join(_address.text.strip_edges(), _port_value())
-	if err != OK:
-		_status.text = "Join failed (error %d)" % err
+	if _connecting:
 		return
-	_status.text = "Connecting..."
+
+	_audio.play_click()
+	var addr := _address_input.text.strip_edges()
+	var port := _join_port_value()
+
+	if addr.is_empty():
+		_set_status("Please specify a valid server address.", Color(0.95, 0.4, 0.25))
+		_audio.play_alert()
+		return
+
+	_connecting = true
+	_connect_timer = 0.0
+	_host_btn.disabled = true
+	_join_btn.disabled = true
+	_cancel_btn.visible = true
+
+	var err := Net.join(addr, port)
+	if err != OK:
+		_connecting = false
+		_host_btn.disabled = false
+		_join_btn.disabled = false
+		_cancel_btn.visible = false
+		_set_status("Join failed immediately (error %d)." % err, Color(0.95, 0.25, 0.25))
+		_audio.play_alert()
+		return
+
+	_set_status("Connecting to %s:%d..." % [addr, port], Color(0.95, 0.8, 0.2))
+
+
+func _on_cancel() -> void:
+	_audio.play_click()
+	Net.leave()
+	_connecting = false
+	_host_btn.disabled = false
+	_join_btn.disabled = false
+	_cancel_btn.visible = false
+	_set_status("Connection canceled.", Color(0.7, 0.75, 0.8))
 
 
 func _on_connected() -> void:
+	_connecting = false
+	_save_settings()
+	_set_status("Connected! Loading match...", Color(0.2, 0.9, 0.4))
 	get_tree().change_scene_to_file(Net.GAME_SCENE)
 
 
 func _on_failed() -> void:
 	Net.leave()
-	_status.text = "Connection failed"
+	_connecting = false
+	_host_btn.disabled = false
+	_join_btn.disabled = false
+	_cancel_btn.visible = false
+	_set_status("Could not connect to server. Is the host running?", Color(0.95, 0.3, 0.3))
+	_audio.play_alert()
+
+
+func _set_status(msg: String, col: Color) -> void:
+	_status_label.text = msg
+	_status_dot.color = col
+
+
+# --- SETTINGS PERSISTENCE ---
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("network", "address", _address_input.text.strip_edges())
+	cfg.set_value("network", "join_port", _port_input.text.strip_edges())
+	cfg.set_value("network", "host_port", _host_port_input.text.strip_edges())
+	var audio_class = load("res://scripts/menu_audio.gd")
+	cfg.set_value("audio", "sound_enabled", audio_class.sound_enabled)
+	cfg.save(CONFIG_FILE)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(CONFIG_FILE) == OK:
+		if cfg.has_section_key("network", "address"):
+			_address_input.text = cfg.get_value("network", "address")
+		if cfg.has_section_key("network", "join_port"):
+			_port_input.text = cfg.get_value("network", "join_port")
+		if cfg.has_section_key("network", "host_port"):
+			_host_port_input.text = cfg.get_value("network", "host_port")
+		if cfg.has_section_key("audio", "sound_enabled"):
+			var audio_class = load("res://scripts/menu_audio.gd")
+			audio_class.sound_enabled = cfg.get_value("audio", "sound_enabled", true)
