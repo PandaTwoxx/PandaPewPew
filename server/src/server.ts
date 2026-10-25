@@ -112,14 +112,28 @@ const server = Bun.serve<WebSocketClientData>({
 
     // Spawn dedicated server room
     if (url.pathname === "/api/rooms/dedicated" && req.method === "POST") {
-      return req.json().then((body: any) => {
-        const room = roomManager.spawnDedicatedRoom({
-          name: body.name,
-          maxPlayers: body.maxPlayers,
+      // Advertise the address the caller used to reach this backend (the
+      // game server runs on the same host), unless PUBLIC_HOST overrides it.
+      // This is what makes dedicated rooms joinable by remote players instead
+      // of pointing them at 127.0.0.1.
+      const spawnWith = (body: any) => {
+        const hostHeader = req.headers.get("host") || "";
+        const hostFromHeader = hostHeader.startsWith("[")
+          ? hostHeader.slice(1, hostHeader.indexOf("]"))
+          : hostHeader.split(":")[0];
+        return roomManager.spawnDedicatedRoom({
+          name: body?.name,
+          maxPlayers: body?.maxPlayers,
+          map: body?.map,
+          mode: body?.mode,
+          hostAddress: process.env.PUBLIC_HOST || hostFromHeader || undefined,
         });
+      };
+      return req.json().then((body: any) => {
+        const room = spawnWith(body);
         return jsonResponse({ success: true, room }, 201);
       }).catch(() => {
-        const room = roomManager.spawnDedicatedRoom({});
+        const room = spawnWith({});
         return jsonResponse({ success: true, room }, 201);
       });
     }
