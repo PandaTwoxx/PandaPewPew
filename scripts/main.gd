@@ -1105,7 +1105,7 @@ func _on_bun_join_code() -> void:
 func _on_bun_spawn_dedicated() -> void:
 	_audio.play_click()
 	_set_status("Spawning dedicated headless server via Bun backend...", Color(0.95, 0.8, 0.2))
-	var room: Dictionary = await Net.spawn_dedicated_bun_room("Dedicated Arena")
+	var room: Dictionary = await Net.spawn_dedicated_bun_room("Dedicated Arena", MapDefs.ORDER[_map_select.selected], ModeDefs.ORDER[_mode_select.selected])
 	if room.is_empty():
 		_set_status("Could not spawn dedicated server. Is Bun backend running?", Color(0.95, 0.3, 0.3))
 		_audio.play_alert()
