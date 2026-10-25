@@ -4,6 +4,8 @@ export interface Room {
   hostName: string;
   hostAddress: string;
   port: number;
+  map?: string;
+  mode?: string;
   playerCount: number;
   maxPlayers: number;
   createdAt: number;
