@@ -1,0 +1,67 @@
+# PandaPewPew server on k3s, synced by the ArgoCD Application pandapewpew-app.
+#
+# Networking notes:
+# - The pod uses the host network on rpi0 so the address players use is
+#   stable: backend on <node>:3000, spawned game servers on <node>:7800-7999
+#   (ENet/UDP). A ClusterIP Service would hide the game ports, and a NodePort
+#   cannot cover the 200-port dedicated range, so host networking is the
+#   honest option for this workload on a homelab cluster.
+# - The backend advertises the address callers used to reach it, so players on
+#   the LAN use the LAN IP and players on the tailnet use the tailnet IP.
+# - The image tag is pinned to a build commit SHA (like aluminium-server);
+#   update it after the build workflow publishes a new image. The `latest`
+#   tag below is only the bootstrap value until the first build lands.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pandapewpew-server
+  namespace: default
+  labels:
+    app: pandapewpew-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pandapewpew-server
+  template:
+    metadata:
+      labels:
+        app: pandapewpew-server
+    spec:
+      nodeName: rpi0
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: pandapewpew-server
+          image: ghcr.io/pandatwoxx/pandapewpew/pandapewpew-server:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: backend
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "3000"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pandapewpew-server
+  namespace: default
+  labels:
+    app: pandapewpew-server
+spec:
+  selector:
+    app: pandapewpew-server
+  ports:
+    - name: backend
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
