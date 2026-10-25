@@ -108,8 +108,12 @@ func join_bun_room(code: String) -> Dictionary:
 	return {}
 
 
-func spawn_dedicated_bun_room(room_name: String = "") -> Dictionary:
+func spawn_dedicated_bun_room(room_name: String = "", map_id: String = "", mode_id: String = "") -> Dictionary:
 	var payload := {"name": room_name}
+	if map_id != "":
+		payload["map"] = map_id
+	if mode_id != "":
+		payload["mode"] = mode_id
 	var res = await _http_post(bun_url + "/api/rooms/dedicated", payload)
 	if res.get("success", false) and res.has("room"):
 		return res["room"]
