@@ -1,6 +1,12 @@
 import type { Room } from "./types";
 import { spawn } from "child_process";
 
+// Maps and modes the game server knows (see scripts/map_defs.gd and
+// scripts/mode_defs.gd). Dedicated servers spawned through the API accept
+// these values and pass them to the Godot server as --map/--mode args.
+const VALID_MAPS = ["farm", "orchard", "corral"];
+const VALID_MODES = ["kills", "ctf", "conquest"];
+
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
   private nextDedicatedPort = 7800;
@@ -33,6 +39,8 @@ export class RoomManager {
     maxPlayers?: number;
     isDedicated?: boolean;
     pid?: number;
+    map?: string;
+    mode?: string;
   }): Room {
     const code = (options.code || this.generateCode()).toUpperCase().trim();
     const now = Date.now();
@@ -49,6 +57,8 @@ export class RoomManager {
       lastHeartbeat: now,
       isDedicated: options.isDedicated || false,
       pid: options.pid,
+      map: options.map,
+      mode: options.mode,
     };
 
     this.rooms.set(code, room);
@@ -93,32 +103,55 @@ export class RoomManager {
     return true;
   }
 
-  public spawnDedicatedRoom(options: { name?: string; maxPlayers?: number }): Room {
+  public spawnDedicatedRoom(options: {
+    name?: string;
+    maxPlayers?: number;
+    map?: string;
+    mode?: string;
+    hostAddress?: string;
+  }): Room {
     const code = this.generateCode();
     const port = this.nextDedicatedPort++;
     if (this.nextDedicatedPort > 7999) {
       this.nextDedicatedPort = 7800;
     }
 
-    const proc = spawn(
-      "godot",
-      ["--headless", "--path", ".", "--", "--server", `--port=${port}`],
-      {
-        cwd: process.cwd(),
-        detached: false,
-        stdio: "ignore",
-      }
-    );
+    // Only forward map/mode values the game actually knows; anything else
+    // falls back to the server's own defaults (farm / kills).
+    const map = VALID_MAPS.includes(options.map || "") ? options.map : undefined;
+    const mode = VALID_MODES.includes(options.mode || "") ? options.mode : undefined;
+    const args = ["--headless", "--path", ".", "--", "--server", `--port=${port}`];
+    if (map) args.push(`--map=${map}`);
+    if (mode) args.push(`--mode=${mode}`);
+
+    // The address clients use to reach this game server. In a container the
+    // loopback default is wrong for remote players, so prefer an explicit
+    // PUBLIC_HOST env var, then the address the caller used for the request.
+    const hostAddress =
+      options.hostAddress || process.env.PUBLIC_HOST || "127.0.0.1";
+
+    const proc = spawn("godot", args, {
+      cwd: process.cwd(),
+      detached: false,
+      stdio: "ignore",
+    });
 
     const room = this.createRoom({
       code,
       name: options.name || `Dedicated ${code}`,
       hostName: "Dedicated Server",
-      hostAddress: "127.0.0.1",
+      hostAddress,
       port,
       maxPlayers: options.maxPlayers || 32,
       isDedicated: true,
       pid: proc.pid,
+      map,
+      mode,
+    });
+
+    proc.on("error", (err) => {
+      console.log(`[RoomManager] Failed to start dedicated server ${code}: ${err}`);
+      this.rooms.delete(code);
     });
 
     proc.on("exit", (exitCode) => {
@@ -129,9 +162,26 @@ export class RoomManager {
     return room;
   }
 
+  private isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (e: any) {
+      // EPERM means the process exists but we cannot signal it; ESRCH means gone.
+      return e?.code === "EPERM";
+    }
+  }
+
   private cleanupStaleRooms(): void {
     const now = Date.now();
     for (const [code, room] of this.rooms.entries()) {
+      // Dedicated servers have no client sending heartbeats, so a stale
+      // timestamp must not kill a live game: refresh while the process runs,
+      // and only reap it once the process is actually gone.
+      if (room.isDedicated && room.pid && this.isProcessAlive(room.pid)) {
+        room.lastHeartbeat = now;
+        continue;
+      }
       if (now - room.lastHeartbeat > 45000) {
         console.log(`[RoomManager] Room ${code} timed out, cleaning up.`);
         this.removeRoom(code);
