@@ -1086,7 +1086,7 @@ func _on_bun_join_code() -> void:
 		_audio.play_alert()
 		return
 
-	var host_addr: String = room.get("hostAddress", "127.0.0.1")
+	var host_addr := Net.room_host_address(room)
 	var host_port: int = room.get("port", Net.DEFAULT_PORT)
 	_set_status("Found room [%s] at %s:%d! Connecting..." % [code, host_addr, host_port], Color(0.2, 0.8, 0.5))
 
@@ -1112,7 +1112,7 @@ func _on_bun_spawn_dedicated() -> void:
 		return
 
 	var code: String = room.get("code", "")
-	var host_addr: String = room.get("hostAddress", "127.0.0.1")
+	var host_addr := Net.room_host_address(room)
 	var host_port: int = room.get("port", 7800)
 	_set_status("Dedicated room [%s] spawned on port %d! Connecting..." % [code, host_port], Color(0.2, 0.9, 0.4))
 
@@ -1184,7 +1184,7 @@ func _refresh_bun_rooms() -> void:
 		var join_room_btn := Button.new()
 		join_room_btn.text = "Join"
 		join_room_btn.add_theme_font_size_override("font_size", 10)
-		var h_addr: String = room_dict.get("hostAddress", "127.0.0.1")
+		var h_addr := Net.room_host_address(room_dict)
 		var h_port: int = room_dict.get("port", Net.DEFAULT_PORT)
 		join_room_btn.pressed.connect(func():
 			_audio.play_click()
@@ -1252,4 +1252,3 @@ func _load_settings() -> void:
 		if cfg.has_section_key("audio", "sound_enabled"):
 			var audio_class = load("res://scripts/menu_audio.gd")
 			audio_class.sound_enabled = cfg.get_value("audio", "sound_enabled", true)
-

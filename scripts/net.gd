@@ -45,6 +45,43 @@ func set_bun_url(url: String) -> void:
 	bun_url = url.strip_edges().trim_suffix("/")
 
 
+func room_host_address(room: Dictionary) -> String:
+	var host: String = str(room.get("hostAddress", "")).strip_edges()
+	var normalized_host := host.to_lower()
+	var is_loopback := (
+		normalized_host == ""
+		or normalized_host == "localhost"
+		or normalized_host == "127.0.0.1"
+		or normalized_host.begins_with("127.")
+		or normalized_host == "::1"
+		or normalized_host == "[::1]"
+	)
+	if not is_loopback:
+		return host
+
+	# Room metadata can contain a loopback address that is only valid on the backend host.
+	var authority := bun_url.strip_edges()
+	var scheme_end := authority.find("://")
+	if scheme_end >= 0:
+		authority = authority.substr(scheme_end + 3)
+	for delimiter in ["/", "?", "#"]:
+		var delimiter_index := authority.find(delimiter)
+		if delimiter_index >= 0:
+			authority = authority.substr(0, delimiter_index)
+	var user_info_end := authority.rfind("@")
+	if user_info_end >= 0:
+		authority = authority.substr(user_info_end + 1)
+
+	if authority.begins_with("["):
+		var ipv6_end := authority.find("]")
+		if ipv6_end > 0:
+			return authority.substr(1, ipv6_end - 1)
+	var port_separator := authority.find(":")
+	if port_separator >= 0:
+		authority = authority.substr(0, port_separator)
+	return authority.strip_edges()
+
+
 func _checked(value: String, valid: bool, fallback: String) -> String:
 	if not valid:
 		push_warning("Unknown value '%s', using '%s'" % [value, fallback])
