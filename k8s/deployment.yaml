@@ -28,6 +28,8 @@ spec:
       labels:
         app: pandapewpew-server
     spec:
+      imagePullSecrets:
+        - name: ghcr-secret
       nodeName: rpi0
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
